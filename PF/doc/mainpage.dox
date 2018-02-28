@@ -1,0 +1,205 @@
+/** @mainpage Projeto Final
+ *
+\section intro_sec Descrição Geral
+
+Este projeto consiste na receção e apresentação dos dados enviados por um sensor de medição precisa de
+distâncias e na representação de um simples perfil de objetos possível de recrear, através dos dados obtidos pelo sensor, 
+ao realizar um varrimento sobre os mesmos. 
+
+\image html sickC.jpg "Sensor SENSICK DT20 Hi."  
+
+\author  Joana Mota
+
+\section sist_sec Descrição do Sistema Remoto
+
+Para a realização deste projeto foi utilizado como sistema remoto um ESP8266 que processa a receção dos dados de 
+um sensor de medição de deslocamentos. O sensor é o SENSICK DT20 Hi que é um dispositivo optoelectrónico que permite obter 
+distâncias entre objetos via ótica e sem contacto. Esta medição é realizada através da velocidade da luz e do intervalo de tempo que o feixe laser 
+demora desde o momento que sai do sensor até retornar ao mesmo.
+O emissor é um laser de cor vermelha com comprimento de onda de 655nm, que permite uma boa 
+leitura da distância, independentemente da rugosidade do objeto onde o laser incide.
+O modo do funcionamento deste sensor é apresentado na seguinte figura, para uma melhor compreensão.
+
+\image html funcionamentoSENSICKc.png "Funcionamento do sensor."
+
+Este sensor da SICK tem duas saı́das de sinal, uma analógica e 
+uma de comutação, e tem ainda uma entrada multifunções. 
+Visto que a saı́da analógica do sensor age como uma fonte de corrente e a 
+entrada analógica do ESP8266 faz uma leitura de tensão, foi necessário converter a corrente da saı́da do sensor 
+numa tensão proporcional à mesma, utilizando uma resistência em série. 
+Depois de tudo corretamente conectado e funcional, foram recolhidas várias leituras do sensor e as várias 
+distâncias correspondestes, apresentadas no \a display do mesmo,
+de forma a ser possível traçar uma regressão linear, para determinar a distância a que se encontram os objetos em função leitura obtida.
+É apresentado de seguida a porção do código,realizado no \a Arduino \a IDE, através do qual o ESP realiza a leitura do sensor 
+e calcula a distância desejada.
+
+
+\code {.c}
+  // read the analog in value:
+  sensorValue = analogRead(analogInPin);
+
+  //Calculates the distance with the regression
+  DistanceSENSICK=-0.9421*sensorValue+831.1;
+
+  // print the results to the Serial Monitor:  
+  Serial.print(DistanceSENSICK);
+  Serial.print("\n");   
+\endcode
+
+A comunicação entre o ESP8266 e o computador é garantida recorrendo a uma porta série (RS232).
+
+
+\section pros_sec Divisão dos Processos
+
+Foi criado, através do fork(), dois processos que ocorrem em simultâneo e estabeleceu-se uma 
+comunicação entre ambos por memória partilhada.
+
+O processo ChildMainRs232() estabelece a comunicação com o ESP8266, por RS232 e lê o que vem da porta série
+acumulando os valores numa variável até encontrar um caracter especifico, que neste caso é caracter representativo do parágrafo,
+dado que o ESP envia os valores da distância separados por um parágrafo. Posteriormente o valor da distância é enviado para 
+a \a shared \a memory de modo a que o outro processo tenha acesso a esta variável. Este procedimento é realizado continuamente 
+até ser destruído pelo processo pai. Este processo é também responsável pela procura e pelo estabelecimento da conexão 
+com a porta série por onde de momento estão a ser enviadas as leituras. 
+
+O processo ParentMainGTK() é responsável pela configuração do GTK.
+
+A arquitetura do sistema é apresentada de seguida para uma melhor compreensão do programa.
+
+\image html arquitetura.png "Arquitetura do Sistema."
+
+\section int_sec Interface Gráfica
+
+A interface gráfica é composta por uma \a label onde é possível visualizar continuamente a distância obtida pelo sensor. Visto
+que o sensor poderá estar acoplado a um manipulador que se movimenta de forma paralela a um plano, é possível indicar na \a entry 
+existente a distância a que se encontra o sensor do plano, e quando este deteta algo diferente do plano, é apresentada
+uma sinalização de \a "Object Found". Este processo é repetido de 100ms em 100ms, através do seguinte código, de forma
+a apresentar os dados de uma forma mais clara.
+
+\code {.c}
+gboolean my_timeout(gpointer user_data)
+{
+        GtkLabel *lblDist= GTK_LABEL(gtk_builder_get_object(builderG,"labelDist"));
+        gtk_label_set_text(lblDist, data->Dist);   //set entry text in "labelDist" widget
+
+        GtkEntry *entry = GTK_ENTRY(gtk_builder_get_object(builderG,"entryDist"));
+        GtkLabel *lblDetectObj= GTK_LABEL(gtk_builder_get_object(builderG,"labelDetectObj")); //Get some specific label ID to change it
+        int comp;
+        int control;
+ 
+        if(entry) 
+        {
+                const char* entryval = gtk_entry_get_text(entry); //get the text from "entryDist" widget
+                comp=atoi(entryval)-atoi(data->Dist);   
+                control=atoi(entryval)/100;     //Control to only evaluate when the input distance has at least 3 decimal digits
+                if (control<10 && control>0 && comp<=10)
+                {
+                        gtk_label_set_text(lblDetectObj, "Object NOT Found");   //set entry text in "labelDetectObj" widget
+
+                }
+                else if (control<10 && control>0 )
+                {
+                        gtk_label_set_text(lblDetectObj, "Object Found");   //set entry text in "labelDetectObj" widget
+                }
+                else
+                {
+                        gtk_label_set_text(lblDetectObj, " ");   //set entry text in "labelDetectObj" widget
+                }
+        }
+        return scan;
+}
+\endcode
+
+Para além dos componentes já mencionados anteriormente, a interface é igualmente composta
+por dois botões, um \a START e um \a STOP \a scan, que inicializam e param, respetivamente
+o varrimento realizado pelo sensor. Ao inicializar um \a Scan serão acumuladas numa \a array todas as distâncias
+lidas num intervalo de 3ms em 3ms, visto o sensor ter uma taxa de emissão de 2.8ms. De forma a que representação 
+do perfil dos objetos tenha uma apresentação mais suave dos dados recolhidos, realizou-se uma filtragem dos mesmos,
+removendo assim algum ruído. Este processo é apresentado no extrato do código seguinte.
+
+\code {.c}
+gboolean my_timeoutFast(gpointer user_data)
+{
+        float mean=0;
+        datasave[point]= atof(data->Dist);      //storage the distance values
+
+        if (point%10==0)
+        {
+                if (point==0)
+                {
+                        datafilter[pointfilt]==datasave[point];
+                        pointfilt++;
+                }
+                else
+                {
+                        for (int i = 0; i < 100; i++)
+                        {
+                                mean=mean+datasave[point-i];
+                        }
+                        //Calculates the mean of 100 values of the datasave 
+                        //and storages it in datafilter to smooth the analysis
+                        datafilter[pointfilt]=mean/100;
+                        pointfilt++;
+                }
+        }
+        point++;
+        if (pointfilt==1500)
+        {
+                return FALSE;   //Stops fuction loop when datafilter reaches a specific dimension
+        }
+
+        return scan2;
+}
+\endcode
+
+A representação do perfil dos objetos é realizada na \a drawingarea da seguinte forma. 
+
+\code {.c}
+void p_RedrawFreeForm(cairo_t * cr)
+{
+        cairo_set_source_rgb(cr, 1, 0, 0);  //define color
+        cairo_set_line_width(cr, 1);        //defines line width 
+
+        float i;
+        int ii=0;
+        cairo_move_to(cr, 0, datafilter[0]);          //iniciates "path"
+        for(i = 1; i < 1500; i=i+1)            //goes through all the acumulated points
+        {
+                cairo_line_to(cr, i, datafilter[ii]); //refreshes the "path"
+                ii++;
+        }
+        cairo_stroke(cr);     //"prints" the entire "path" on the drawing area
+}
+\endcode
+
+\section ex_sec Demonstração do Funcionamento do Programa
+
+Para uma melhor demonstração das funcionalidades deste programa, projetou-se e maquinou-se um suporte 
+de forma a acoplar o sensor a um manipulador, com o objetivo de realizar varrimentos sobre objetos, como se pode visualizar
+na imagem seguinte.
+
+\image html SensorRobotC3.png "Acoplamento do Sensor ao Robô através do suporte maquinado." 
+
+De seguida são apresentados alguns exemplos de varrimentos realizados.
+
+\image html RealFuradorC.jpg "Objetos utilizados no 1º varrimento." 
+
+\image html ScanFuradorC.png "Perfil dos objetos do 1º varrimento."
+
+\image html RealIncliC.jpg "Objetos utilizados no 2º varrimento."
+
+\image html ScanIncliC.png "Perfil dos objetos do 2º varrimento." 
+
+\image html RealPinoC.jpg "Objetos utilizados no 3º varrimento." 
+
+\image html ScanPinoC.png "Perfil dos objetos do 3º varrimento." 
+
+
+Uma limitação deste projeto é o modo da disposição do sensor, para uma correta leitura das distâncias. Isto é possível de
+se visualizar na figura do perfil dos objetos do 3º varrimento, onde ocorreu um pico na medição da leitura do sensor.  
+Este pico é justificado pelo facto de o sinal depois de emitido pelo sensor ao retornar ao mesmo, colide com um objeto
+que redireciona o feixe do laser, nunca retornando ao sensor. Desta forma não é possível calcular a distância a que
+se encontra o objeto naquele respetivo ponto. Será necessário a realização de um estudo mais aprofundado sobre a melhor
+colocação do sensor para a correta leitura de todas as distâncias.
+
+
+*/

@@ -1,0 +1,35 @@
+{
+    "files.associations": {
+        "array": "c",
+        "initializer_list": "c",
+        "utility": "c",
+        "system_error": "c"
+    },
+    "cSpell.enabledLanguageIds": [
+        "c",
+        "cpp",
+        "csharp",
+        "css",
+        "doxygen",
+        "go",
+        "handlebars",
+        "html",
+        "jade",
+        "javascript",
+        "javascriptreact",
+        "json",
+        "latex",
+        "less",
+        "markdown",
+        "php",
+        "plaintext",
+        "pub",
+        "python",
+        "restructuredtext",
+        "scss",
+        "text",
+        "typescript",
+        "typescriptreact",
+        "yml"
+    ]
+}
